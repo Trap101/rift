@@ -171,6 +171,13 @@ impl AnimationManager {
                 match window_store.window_mut(wid) {
                     Some(window) => {
                         let current_frame = window.frame_monotonic;
+                        // rift-ship-01: coalescing guard is in app.rs (flush-before-coalesce).
+                        // frame_monotonic + tx redundant checks remain; they latch
+                        // with the coalescing above on relaunch. Partial snapshot
+                        // (reactor.rs:727) and Ghostty rekey (reactor.rs:498,530)
+                        // are deferred for follow-up ships — see AGENTS.md.
+                        // ponytail ceiling: one-frame HashMap guard in app.rs; promote
+                        // to per-window queue only if measured coalescing persists.
                         if target_frame.same_as(current_frame) {
                             continue;
                         }
@@ -389,14 +396,18 @@ impl AnimationManager {
             }
 
             if let Some(wsid) = window_server_id {
-                reactor
-                    .transaction_manager
-                    .update_txid_entries([(wsid, txid, target_frame)]);
+                reactor.transaction_manager.update_txid_entries([(wsid, txid, target_frame)]);
             }
 
             // For slide we animate from offscreen; for fade we still create an entry
             // so the animation has duration even though start==finish.
-            trace!(?wid, ?start_frame, ?target_frame, ?transition, "Workspace transition anim");
+            trace!(
+                ?wid,
+                ?start_frame,
+                ?target_frame,
+                ?transition,
+                "Workspace transition anim"
+            );
             anim.add_window(&handle, wid, start_frame, target_frame, false, txid);
             animated_count += 1;
         }

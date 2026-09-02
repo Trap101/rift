@@ -843,6 +843,16 @@ impl State {
                 ));
             }
             Request::AnimationFrame { wid, frame, set_size, txid } => {
+                // ponytail: one-frame coalescing guard — flush any pending frame for
+                // this window before coalescing so a relaunch zero-duration burst
+                // (frame_monotonic + tx + app-actor) cannot latch the next tab-move
+                // tween into an instant snap. Keeps HashMap shape; upgrade to
+                // per-window queue if coalescing is measured. Deferred roots:
+                // partial snapshot (reactor.rs:727) and Ghostty rekey
+                // (reactor.rs:498,530) untouched for follow-up ships.
+                if self.pending_frames.contains_key(&wid) {
+                    let _ = self.flush_frames(wid);
+                }
                 self.pending_frames.insert(
                     wid,
                     PendingFrame {

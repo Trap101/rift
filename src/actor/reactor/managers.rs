@@ -418,16 +418,17 @@ impl LayoutManager {
                         && !crate::sys::power::is_low_power_mode_enabled()
                 };
                 if try_animated {
-                    let screen_frame = reactor
-                        .space_state
-                        .screen_by_space(space)
-                        .map(|s| s.frame)
-                        .unwrap_or(CGRect::new(
-                            CGPoint::new(0.0, 0.0),
-                            CGSize::new(1000.0, 800.0),
-                        ));
-                    let animated =
-                        AnimationManager::workspace_switch_animated(reactor, space, &layout, screen_frame, skip_wid);
+                    let screen_frame =
+                        reactor.space_state.screen_by_space(space).map(|s| s.frame).unwrap_or(
+                            CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1000.0, 800.0)),
+                        );
+                    let animated = AnimationManager::workspace_switch_animated(
+                        reactor,
+                        space,
+                        &layout,
+                        screen_frame,
+                        skip_wid,
+                    );
                     if animated {
                         any_frame_changed |= true;
                     } else {
@@ -436,8 +437,9 @@ impl LayoutManager {
                         );
                     }
                 } else {
-                    any_frame_changed |=
-                        AnimationManager::workspace_switch_layout(reactor, space, &layout, skip_wid);
+                    any_frame_changed |= AnimationManager::workspace_switch_layout(
+                        reactor, space, &layout, skip_wid,
+                    );
                 }
             } else if reactor.workspace_switch_manager.active_workspace_switch.is_some() {
                 any_frame_changed |=

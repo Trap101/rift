@@ -182,3 +182,10 @@ When adding a config field, update:
   - temporary test keybinds were added for display move/workspace testing
   - if behavior seems confusing, inspect that live config first before assuming default config behavior
 - If continuing this feature, first reproduce manually in the running app, then trace actual runtime state transitions with logs before making more structural edits.
+
+## 14) Rift relaunch — animation latch fix (rift-ship-01, 2026-09-02)
+- Root fixed: animation latched to instant via `frame_monotonic` (src/actor/reactor/animation.rs:244,317) + `WindowTxStore` target coalescing (src/actor/reactor/transaction_manager.rs:70, src/model/tx_store.rs:44) + app-actor `pending_frames: HashMap` overwrite (src/actor/app.rs:845) and single `flush_all_frames` per batch (src/actor/app.rs:555-612). Relaunch could produce a zero-duration burst whose last frame coalesced, leaving the next tab-move tween skipped via `same_as`/`get_target_frame`.
+- Fix: one-frame coalescing guard in `src/actor/app.rs` — flush the pending frame before overwriting the `HashMap` entry so a burst cannot collapse N tween frames into one instant write. See inline `ponytail:` comment there for ceiling.
+- Ponytail ceiling: one-frame HashMap guard only; upgrade to per-window `VecDeque`/timer queue only if measured coalescing persists (data/rift-relaunch/report.md §9, §11).
+- Deferred (follow-up ships, do not fix here): partial WindowServer snapshot erasing workspace membership at `src/actor/reactor.rs:727` (`is_empty` guard too narrow + `remove_window(..., preserve_assignments=false)`/`window_store.rs:750`) and Ghostty rekey fallback `same_pid.len()==1` + `focused_window()` unrestricted at `src/actor/reactor.rs:498,530` → `reconcile_restored_window` (`src/layout_engine/engine/persistence/reconcile.rs:201`). See `data/rift-relaunch/report.md` §4 Faults C/D and §8.
+- Manually trace relaunch → tab move no longer jumps: after relaunch, a tab drag that previously latched instant should now deliver ~30 `AnimationFrame` ticks at ~10 ms (see report §2 log excerpt 15:42:25 vs 2026-09-02 `anim.none`).
