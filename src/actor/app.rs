@@ -843,15 +843,25 @@ impl State {
                 ));
             }
             Request::AnimationFrame { wid, frame, set_size, txid } => {
-                // ponytail: one-frame coalescing guard — flush any pending frame for
-                // this window before coalescing so a relaunch zero-duration burst
-                // (frame_monotonic + tx + app-actor) cannot latch the next tab-move
-                // tween into an instant snap. Keeps HashMap shape; upgrade to
-                // per-window queue if coalescing is measured. Deferred roots:
-                // partial snapshot (reactor.rs:727) and Ghostty rekey
-                // (reactor.rs:498,530) untouched for follow-up ships.
-                if self.pending_frames.contains_key(&wid) {
-                    let _ = self.flush_frames(wid);
+                // ponytail: one-frame coalescing guard, bounded to transaction
+                // boundaries. A pending frame from a *different* transaction
+                // belongs to an animation that was replaced mid-flight, so its
+                // last write is flushed instead of being silently dropped by the
+                // successor's first frame. Frames within one animation share a
+                // txid and still coalesce, which keeps the per-batch write
+                // backpressure. This does not relax the reactor-side
+                // `frame_monotonic` / tx-target skips in
+                // `AnimationManager::animate_layout`. Keeps HashMap shape;
+                // upgrade to a per-window queue only if coalescing is measured.
+                // Deferred roots: partial snapshot
+                // (`Reactor::remove_windows_missing_from_active_space_snapshot`)
+                // and Ghostty rekey (`same_pid` fallback in
+                // `reactor/events/window_discovery.rs`) untouched for follow-up
+                // ships.
+                if self.pending_frames.get(&wid).is_some_and(|pending| pending.txid != txid)
+                    && let Err(err) = self.flush_frames(wid)
+                {
+                    warn!(?wid, ?err, "Failed to flush superseded animation frame");
                 }
                 self.pending_frames.insert(
                     wid,

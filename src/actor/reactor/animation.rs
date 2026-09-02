@@ -171,11 +171,16 @@ impl AnimationManager {
                 match window_store.window_mut(wid) {
                     Some(window) => {
                         let current_frame = window.frame_monotonic;
-                        // rift-ship-01: coalescing guard is in app.rs (flush-before-coalesce).
-                        // frame_monotonic + tx redundant checks remain; they latch
-                        // with the coalescing above on relaunch. Partial snapshot
-                        // (reactor.rs:727) and Ghostty rekey (reactor.rs:498,530)
-                        // are deferred for follow-up ships — see AGENTS.md.
+                        // rift-ship-01: the coalescing guard lives in app.rs
+                        // (flush-before-coalesce, bounded by txid) and only affects
+                        // how many frames the app actor writes. These two redundant
+                        // checks are reactor-owned and unchanged, so they still skip
+                        // a tween whose target equals the frame/tx target latched by
+                        // an earlier zero-duration relaunch burst. Partial snapshot
+                        // (`Reactor::remove_windows_missing_from_active_space_snapshot`)
+                        // and Ghostty rekey (`same_pid` fallback in
+                        // `reactor/events/window_discovery.rs`) are deferred for
+                        // follow-up ships — see AGENTS.md §14.
                         // ponytail ceiling: one-frame HashMap guard in app.rs; promote
                         // to per-window queue only if measured coalescing persists.
                         if target_frame.same_as(current_frame) {
