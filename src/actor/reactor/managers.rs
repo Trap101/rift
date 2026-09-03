@@ -454,8 +454,10 @@ impl LayoutManager {
                     AnimationManager::animate_layout(reactor, space, &layout, is_resize, skip_wid);
             }
         }
-        if was_suppressed {
+        if was_suppressed && any_frame_changed {
             reactor.suppress_next_redundant_animation_check = false;
+        } else if was_suppressed {
+            // Keep guard alive until it actually gates a layout (first app with empty layout burns it otherwise).
         }
 
         Ok(any_frame_changed)
