@@ -333,6 +333,9 @@ pub struct Reactor {
     pending_space_change_manager: managers::PendingSpaceChangeManager,
     active_spaces: HashSet<SpaceId>,
     pub animation_tx: Option<AnimationSender>,
+    // rift-ship-01: one-frame guard for relaunch latch (frame_monotonic + tx).
+    // ponytail ceiling: bool only; promote to generation counter if needed.
+    pub(crate) suppress_next_redundant_animation_check: bool,
 }
 
 impl Reactor {
@@ -453,6 +456,7 @@ impl Reactor {
             },
             active_spaces: HashSet::default(),
             animation_tx: None,
+            suppress_next_redundant_animation_check: true,
         };
         reactor
     }

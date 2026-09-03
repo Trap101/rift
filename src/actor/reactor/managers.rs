@@ -303,6 +303,11 @@ impl LayoutManager {
             .take()
             .or(reactor.drag_manager.drag_swap_manager.dragged());
         let mut any_frame_changed = false;
+        // rift-ship-01: consume one-frame relaunch guard for
+        // frame_monotonic+tx latch. One bool for the whole batch so
+        // multi-display first layout is fully guarded. ponytail: bool
+        // only; generation counter if needed.
+        let was_suppressed = reactor.suppress_next_redundant_animation_check;
 
         let active_space = reactor.workspace_command_space();
         for (space, layout) in layout_result {
@@ -448,6 +453,9 @@ impl LayoutManager {
                 any_frame_changed |=
                     AnimationManager::animate_layout(reactor, space, &layout, is_resize, skip_wid);
             }
+        }
+        if was_suppressed {
+            reactor.suppress_next_redundant_animation_check = false;
         }
 
         Ok(any_frame_changed)
