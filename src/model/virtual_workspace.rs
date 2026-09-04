@@ -1370,7 +1370,10 @@ mod tests {
             new_space,
             None,
         ));
-        assert_eq!(effects.workspace_id, manager.get_default_workspace(new_space).unwrap());
+        assert_eq!(
+            effects.workspace_id,
+            manager.get_default_workspace(new_space).unwrap()
+        );
         assert_eq!(
             manager.workspace_for_window(&window_store, new_space, transient_window),
             Some(effects.workspace_id)
