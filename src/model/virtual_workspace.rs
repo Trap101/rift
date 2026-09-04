@@ -936,6 +936,22 @@ impl WorkspaceStore {
         window_id: WindowId,
         space: SpaceId,
     ) -> Result<VirtualWorkspaceId, WorkspaceError> {
+        // S1-class fix: re-admission defaults to last-workspace memory instead of
+        // the active workspace. assign_window_to_workspace rejects stale entries
+        // (deleted/foreign workspace), falling through to the default below.
+        if let Some(remembered) = window_store
+            .last_workspace_for_window(window_id)
+            .filter(|remembered| remembered.space == space)
+            && self.assign_window_to_workspace(
+                window_store,
+                space,
+                window_id,
+                remembered.workspace_id,
+            )
+        {
+            window_store.clear_rule_floating(window_id);
+            return Ok(remembered.workspace_id);
+        }
         let default_workspace_id = self.get_default_workspace(space)?;
         if self.assign_window_to_workspace(window_store, space, window_id, default_workspace_id) {
             window_store.clear_rule_floating(window_id);
@@ -951,7 +967,16 @@ impl WorkspaceStore {
         window_id: WindowId,
         space: SpaceId,
     ) -> Option<WindowWorkspaceInfo> {
-        let existing_assignment = window_store.workspace_info_for_window(window_id)?;
+        // S1-class fix: removal stashes the live assignment in the store's
+        // last-workspace memory, so consult it when the live record is gone
+        // (minimise, partial snapshot). Same-space only; cross-space moves keep
+        // the resolution path below.
+        let existing_assignment =
+            window_store.workspace_info_for_window(window_id).or_else(|| {
+                window_store
+                    .last_workspace_for_window(window_id)
+                    .filter(|remembered| remembered.space == space)
+            })?;
         if existing_assignment.space == space {
             return Some(existing_assignment);
         }
@@ -1260,6 +1285,38 @@ mod tests {
         assert_eq!(
             manager.workspace_windows(&window_store, space, ws2_id),
             vec![window2]
+        );
+    }
+
+    #[test]
+    fn minimise_roundtrip_restores_last_workspace_instead_of_active() {
+        // S1d: a window in a non-active workspace is removed (minimise erases the
+        // live assignment) then re-admitted while another workspace is active.
+        // Re-admission must default to last-workspace memory, not active.
+        let mut window_store = WindowStore::default();
+        let mut manager = WorkspaceStore::new();
+        let space = SpaceId::new(1);
+        let ws1_id = manager.create_workspace(space, Some("WS1".to_string())).unwrap();
+        let ws2_id = manager.create_workspace(space, Some("WS2".to_string())).unwrap();
+        let window = WindowId::new(1, 1);
+
+        assert!(manager.set_active_workspace(space, ws1_id));
+        assert!(manager.assign_window_to_workspace(&mut window_store, space, window, ws2_id));
+
+        // Minimise half: removal erases the live assignment.
+        manager.remove_window(&mut window_store, window);
+        assert_eq!(window_store.workspace_info_for_window(window), None);
+
+        // Deminimise half via the rule path: no rule, active workspace is ws1.
+        let effects =
+            expect_managed(manager.apply_app_rule_decision(&mut window_store, window, space, None));
+        assert_eq!(effects.workspace_id, ws2_id);
+
+        // And via the direct admission path after a second removal.
+        manager.remove_window(&mut window_store, window);
+        assert_eq!(
+            manager.auto_assign_window(&mut window_store, window, space),
+            Ok(ws2_id)
         );
     }
 
