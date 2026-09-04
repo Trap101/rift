@@ -964,7 +964,7 @@ impl WorkspaceStore {
     /// Last-workspace memory for `window_id`, but only when it still names a
     /// live workspace of `space`. `remap_space` and workspace deletion can leave
     /// the memory pointing at a workspace that no longer exists.
-    fn remembered_workspace_assignment(
+    pub(crate) fn remembered_workspace_assignment(
         &self,
         window_store: &WindowStore,
         window_id: WindowId,
