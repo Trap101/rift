@@ -786,7 +786,7 @@ pub struct LayoutSettings {
     /// Settings inherited by every layout type unless overridden by its table.
     #[serde(flatten)]
     pub base: BaseLayoutSettings,
-    /// Layout mode: "traditional", "bsp", "stack", "master_stack", or "scrolling"
+    /// Layout mode: "traditional", "bsp", "stack", "master_stack", "scrolling", or "monocle"
     #[serde(default)]
     pub mode: LayoutMode,
     /// Traditional layout configuration
@@ -1104,6 +1104,8 @@ impl LayoutSettings {
             LayoutMode::Stack => &self.stack.base,
             LayoutMode::MasterStack => &self.master_stack.base,
             LayoutMode::Scrolling => &self.scrolling.base,
+            // Monocle has no dedicated settings table; it inherits the global base.
+            LayoutMode::Monocle => &self.base,
         }
     }
 
@@ -2050,5 +2052,56 @@ mod tests {
         assert!(suggestion.is_some());
         let (s, _maybe_dep) = suggestion.unwrap();
         assert_eq!(s, "toggle_stack");
+    }
+
+    #[test]
+    fn monocle_is_selectable_from_config_and_keybinding() {
+        let cfg = Config::parse(
+            r#"
+                [settings]
+                animate = false
+
+                [settings.layout]
+                mode = "monocle"
+                window_insertion_point = "end_of_tree"
+
+                [keys]
+                "Alt + M" = "toggle_monocle"
+
+                [virtual_workspaces]
+                workspace_rules = [
+                    { workspace = 2, layout = "monocle" },
+                    { workspace = "coding", layout = "bsp" },
+                ]
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(cfg.settings.layout.mode, LayoutMode::Monocle);
+        assert!(cfg.keys.iter().any(|(_, cmd)| {
+            *cmd == WmCommand::ReactorCommand(reactor::Command::Layout(
+                LayoutCommand::ToggleMonocle,
+            ))
+        }));
+        assert_eq!(
+            cfg.virtual_workspaces.workspace_rules[0].layout,
+            LayoutMode::Monocle
+        );
+        assert_eq!(cfg.virtual_workspaces.workspace_rules[1].layout, LayoutMode::Bsp);
+        // Monocle has no settings table: it inherits the global base layout settings.
+        assert_eq!(
+            cfg.settings.layout.resolved_base_for(LayoutMode::Monocle),
+            cfg.settings.layout.resolved_base_for(LayoutMode::Traditional)
+        );
+        assert_eq!(
+            cfg.settings.layout.window_insertion_point_for(LayoutMode::Monocle),
+            WindowInsertionPoint::EndOfTree
+        );
+
+        let bad_rule: Result<VirtualWorkspaceSettings, _> =
+            toml::from_str(r#"workspace_rules = [{ workspace = 2, layout = "monocl" }]"#);
+        assert!(bad_rule.is_err());
+        let bad_mode: Result<LayoutSettings, _> = toml::from_str(r#"mode = "monocl""#);
+        assert!(bad_mode.is_err());
     }
 }

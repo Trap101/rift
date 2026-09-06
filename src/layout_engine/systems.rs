@@ -195,6 +195,8 @@ pub(crate) mod constraints;
 pub use bsp::BspLayoutSystem;
 mod master_stack;
 pub use master_stack::MasterStackLayoutSystem;
+mod monocle;
+pub use monocle::MonocleLayoutSystem;
 mod scrolling;
 pub use scrolling::ScrollingLayoutSystem;
 
@@ -385,4 +387,5 @@ pub enum LayoutSystemKind {
     MasterStack(MasterStackLayoutSystem),
     Scrolling(ScrollingLayoutSystem),
     Stack(StackLayoutSystem),
+    Monocle(MonocleLayoutSystem),
 }

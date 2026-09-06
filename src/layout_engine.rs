@@ -14,7 +14,7 @@ pub(crate) use floating::FloatingManager;
 pub use graph::{Direction, LayoutKind, Orientation, ResizeOrientation};
 pub(crate) use systems::LayoutId;
 pub use systems::{
-    BspLayoutSystem, LayoutSystem, LayoutSystemKind, MasterStackLayoutSystem,
+    BspLayoutSystem, LayoutSystem, LayoutSystemKind, MasterStackLayoutSystem, MonocleLayoutSystem,
     ScrollingLayoutSystem, StackLayoutSystem, TraditionalLayoutSystem,
 };
 pub(crate) use workspaces::WorkspaceLayouts;

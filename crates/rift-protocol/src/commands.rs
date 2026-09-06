@@ -27,6 +27,7 @@ pub enum LayoutCommand {
     ToggleWindowFloating,
     ToggleFullscreen,
     ToggleFullscreenWithinGaps,
+    ToggleMonocle,
     ResizeWindowGrow(ResizeOrientation),
     ResizeWindowShrink(ResizeOrientation),
     ResizeWindowBy {

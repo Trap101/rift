@@ -134,6 +134,8 @@ pub struct LayoutEngine {
     persistence: PersistenceState,
     /// Set only while a master-file startup restore is waiting for the first display snapshot.
     startup_restore_pending: bool,
+    /// Mode to restore when `ToggleMonocle` leaves monocle, keyed by workspace.
+    monocle_return_mode: HashMap<VirtualWorkspaceId, LayoutMode>,
 }
 
 pub(crate) struct WorkspaceLayoutQuerySnapshot {
@@ -247,6 +249,12 @@ impl LayoutEngine {
             return false;
         }
 
+        if mode == LayoutMode::Monocle {
+            self.monocle_return_mode.insert(workspace_id, current_mode);
+        } else {
+            self.monocle_return_mode.remove(&workspace_id);
+        }
+
         window_order.retain(|wid| !self.floating.is_floating(*wid));
 
         let Some(workspace) = self.virtual_workspace_manager.workspaces.get_mut(workspace_id)
@@ -270,6 +278,76 @@ impl LayoutEngine {
         }
 
         true
+    }
+
+    /// Flip the active workspace between monocle and the mode it replaced.
+    /// Leaving monocle restores the mode recorded by the last switch into it, or the
+    /// workspace's configured mode when monocle was never entered through a switch.
+    fn toggle_monocle_mode(
+        &mut self,
+        window_store: &WindowStore,
+        space: SpaceId,
+        workspace_id: VirtualWorkspaceId,
+    ) -> EventResponse {
+        let current = self
+            .virtual_workspace_manager
+            .workspace_info(space, workspace_id)
+            .map(|workspace| workspace.layout_mode)
+            .unwrap_or_default();
+        let target = if current == LayoutMode::Monocle {
+            match self.monocle_return_mode.get(&workspace_id).copied() {
+                Some(mode) => mode,
+                None => self.configured_non_monocle_mode(space, workspace_id),
+            }
+        } else {
+            LayoutMode::Monocle
+        };
+        if !self.switch_workspace_layout_mode(window_store, space, workspace_id, target) {
+            return EventResponse::default();
+        }
+        self.broadcast_workspace_changed(space);
+        self.broadcast_windows_changed(window_store, space);
+        let layout = self.workspace_layouts.active(space, workspace_id);
+        let raise_windows = layout
+            .map(|layout| self.workspace_tree(workspace_id).visible_windows_in_layout(layout))
+            .unwrap_or_default();
+        let raise_windows =
+            self.filter_active_workspace_windows(window_store, space, raise_windows);
+        let focus_window = match self.focused_window {
+            Some(focused) if self.floating.is_floating(focused) => Some(focused),
+            _ => {
+                layout.and_then(|layout| self.workspace_tree(workspace_id).selected_window(layout))
+            }
+        };
+        let focus_window = self.filter_active_workspace_window(window_store, space, focus_window);
+        EventResponse {
+            changed: true,
+            raise_windows,
+            focus_window,
+            boundary_hit: None,
+        }
+    }
+
+    fn configured_non_monocle_mode(
+        &mut self,
+        space: SpaceId,
+        workspace_id: VirtualWorkspaceId,
+    ) -> LayoutMode {
+        let configured = self
+            .virtual_workspace_manager
+            .list_workspaces(space)
+            .iter()
+            .enumerate()
+            .find(|(_, (id, _))| *id == workspace_id)
+            .map(|(index, (_, name))| {
+                self.virtual_workspace_manager.desired_layout_mode_for_workspace(index, name)
+            })
+            .unwrap_or_default();
+        if configured == LayoutMode::Monocle {
+            LayoutMode::default()
+        } else {
+            configured
+        }
     }
 
     fn response_for_raised_windows(raise_windows: Vec<WindowId>) -> EventResponse {
@@ -442,6 +520,8 @@ impl LayoutEngine {
                     mode_settings.base = settings.resolved_base_for(mode);
                     system.update_settings(&mode_settings);
                 }
+                // Monocle carries no settings; selection order survives reloads untouched.
+                LayoutSystemKind::Monocle(_) => {}
             }
         }
     }
@@ -486,6 +566,7 @@ impl LayoutEngine {
                 LayoutSystemKind::Stack(_) => "stack",
                 LayoutSystemKind::MasterStack(_) => "master_stack",
                 LayoutSystemKind::Scrolling(_) => "scrolling",
+                LayoutSystemKind::Monocle(_) => "monocle",
             }
         } else {
             "none"
@@ -500,6 +581,7 @@ impl LayoutEngine {
                 LayoutSystemKind::Stack(_) => crate::common::config::LayoutMode::Stack,
                 LayoutSystemKind::MasterStack(_) => crate::common::config::LayoutMode::MasterStack,
                 LayoutSystemKind::Scrolling(_) => crate::common::config::LayoutMode::Scrolling,
+                LayoutSystemKind::Monocle(_) => crate::common::config::LayoutMode::Monocle,
             }
         } else {
             crate::common::config::LayoutMode::default()
@@ -1325,6 +1407,7 @@ impl LayoutEngine {
             display_last_space: HashMap::default(),
             persistence: PersistenceState::default(),
             startup_restore_pending: false,
+            monocle_return_mode: HashMap::default(),
         }
     }
 
@@ -1983,6 +2066,9 @@ impl LayoutEngine {
                     }
                 }
             }
+            LayoutCommand::ToggleMonocle => {
+                self.toggle_monocle_mode(window_store, space, workspace_id)
+            }
             // handled by upper reactor
             LayoutCommand::NextWorkspace(_)
             | LayoutCommand::PrevWorkspace(_)
@@ -2035,6 +2121,8 @@ impl LayoutEngine {
                     LayoutSystemKind::Scrolling(s) => {
                         Self::toggle_orientation_for_system(s, layout, default_orientation)
                     }
+                    // Monocle is a flat fullscreen stack with no orientation.
+                    LayoutSystemKind::Monocle(_) => EventResponse::default(),
                 }
             }
             LayoutCommand::ResizeWindowGrow(orientation) => {
@@ -4513,5 +4601,355 @@ mod tests {
             engine.virtual_workspace_manager.workspace_for_window(&window_store, space, wid),
             Some(target_workspace)
         );
+    }
+
+    fn monocle_test_windows(pid: pid_t, count: u32) -> Vec<WindowLayoutInfo> {
+        (1..=count)
+            .map(|idx| {
+                (
+                    WindowId::new(pid, idx),
+                    None,
+                    None,
+                    None,
+                    true,
+                    CGSize::new(500.0, 500.0),
+                    None,
+                    None,
+                )
+            })
+            .collect()
+    }
+
+    fn monocle_test_space(
+        engine: &mut LayoutEngine,
+        window_store: &mut WindowStore,
+        space: SpaceId,
+        screen: CGRect,
+        pid: pid_t,
+        count: u32,
+    ) {
+        let _ = engine.handle_event(window_store, LayoutEvent::SpaceExposed(space, screen.size));
+        let _ = engine.handle_event(
+            window_store,
+            LayoutEvent::windows_on_screen_updated(
+                space,
+                pid,
+                monocle_test_windows(pid, count),
+                None,
+            ),
+        );
+    }
+
+    #[test]
+    fn monocle_stacks_windows_on_one_fullscreen_frame() {
+        let mut window_store = WindowStore::default();
+        let mut engine = test_engine();
+        let space = SpaceId::new(101);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6101, 2);
+
+        let response = engine.handle_virtual_workspace_command(
+            &mut window_store,
+            space,
+            &LayoutCommand::SetWorkspaceLayout {
+                workspace: None,
+                mode: LayoutMode::Monocle,
+            },
+        );
+        assert!(response.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+
+        let gaps = engine.layout_settings.gaps.effective_for_display(None);
+        let positions = engine.calculate_layout_with_virtual_workspaces(
+            &window_store,
+            space,
+            screen,
+            &gaps,
+            0.0,
+            Default::default(),
+            Default::default(),
+            |_| None,
+            &[screen],
+        );
+        assert_eq!(positions.len(), 2);
+        for (_, frame) in &positions {
+            assert_eq!(*frame, screen);
+        }
+    }
+
+    #[test]
+    fn toggle_monocle_round_trip_restores_previous_mode() {
+        let mut window_store = WindowStore::default();
+        let mut engine = test_engine();
+        let space = SpaceId::new(102);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6102, 1);
+        let visible_spaces = vec![space];
+        let mut visible_space_centers = HashMap::default();
+        visible_space_centers.insert(space, CGPoint::new(0.0, 0.0));
+
+        // Start from bsp so the test proves the return mode is remembered, not hardcoded.
+        let response = engine.handle_virtual_workspace_command(
+            &mut window_store,
+            space,
+            &LayoutCommand::SetWorkspaceLayout {
+                workspace: None,
+                mode: LayoutMode::Bsp,
+            },
+        );
+        assert!(response.changed);
+
+        let toggle_on = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_on.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+
+        let toggle_off = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_off.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Bsp);
+    }
+
+    #[test]
+    fn monocle_is_selectable_per_workspace() {
+        let mut window_store = WindowStore::default();
+        let mut engine = test_engine();
+        let space = SpaceId::new(103);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6103, 1);
+
+        let response = engine.handle_virtual_workspace_command(
+            &mut window_store,
+            space,
+            &LayoutCommand::SetWorkspaceLayout {
+                workspace: Some(0),
+                mode: LayoutMode::Monocle,
+            },
+        );
+        assert!(response.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+
+        let switch = engine.handle_virtual_workspace_command(
+            &mut window_store,
+            space,
+            &LayoutCommand::SwitchToWorkspace(1),
+        );
+        assert!(switch.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Traditional);
+
+        let back = engine.handle_virtual_workspace_command(
+            &mut window_store,
+            space,
+            &LayoutCommand::SwitchToWorkspace(0),
+        );
+        assert!(back.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+    }
+
+    #[test]
+    fn toggle_monocle_keeps_focus_on_focused_floating_window() {
+        let mut window_store = WindowStore::default();
+        let mut engine = test_engine();
+        let space = SpaceId::new(107);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6107, 2);
+        let visible_spaces = vec![space];
+        let mut visible_space_centers = HashMap::default();
+        visible_space_centers.insert(space, CGPoint::new(0.0, 0.0));
+        let floating = WindowId::new(6107, 1);
+        let tiled = WindowId::new(6107, 2);
+
+        let _ = engine.handle_event(&mut window_store, LayoutEvent::WindowFocused(space, floating));
+        let _ = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleWindowFloating,
+        );
+        assert!(engine.floating.is_floating(floating));
+
+        let toggle_on = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_on.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+        assert_eq!(toggle_on.focus_window, Some(floating));
+        assert_eq!(toggle_on.raise_windows, vec![tiled]);
+
+        let _ = engine.handle_event(&mut window_store, LayoutEvent::WindowFocused(space, tiled));
+        let toggle_off = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_off.changed);
+        assert_eq!(toggle_off.focus_window, Some(tiled));
+    }
+
+    #[test]
+    fn toggle_monocle_after_restore_exits_to_configured_mode() {
+        let mut window_store = WindowStore::default();
+        let mut layout_settings = LayoutSettings::default();
+        layout_settings.mode = LayoutMode::Bsp;
+        let workspace_settings = VirtualWorkspaceSettings::default();
+        let mut engine = LayoutEngine::new(&workspace_settings, &layout_settings, None);
+        let space = SpaceId::new(104);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6104, 1);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Bsp);
+
+        let response = engine.handle_virtual_workspace_command(
+            &mut window_store,
+            space,
+            &LayoutCommand::SetWorkspaceLayout {
+                workspace: None,
+                mode: LayoutMode::Monocle,
+            },
+        );
+        assert!(response.changed);
+
+        let path = std::env::temp_dir().join(format!(
+            "rift-monocle-restore-test-{}-{}.ron",
+            std::process::id(),
+            space.get()
+        ));
+        engine.save(path.clone()).unwrap();
+        let mut restored = LayoutEngine::load(path.clone()).unwrap();
+        let _ = std::fs::remove_file(path);
+        restored.finish_loading(&workspace_settings, &layout_settings, None);
+        assert_eq!(restored.active_layout_mode_at(space), LayoutMode::Monocle);
+
+        let visible_spaces = vec![space];
+        let mut visible_space_centers = HashMap::default();
+        visible_space_centers.insert(space, CGPoint::new(0.0, 0.0));
+        let mut restored_store = WindowStore::default();
+        let toggle_off = restored.handle_command(
+            &mut restored_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_off.changed);
+        assert_eq!(restored.active_layout_mode_at(space), LayoutMode::Bsp);
+    }
+
+    #[test]
+    fn toggle_monocle_restores_mode_replaced_by_set_workspace_layout() {
+        let mut window_store = WindowStore::default();
+        let mut engine = test_engine();
+        let space = SpaceId::new(105);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6105, 1);
+        let visible_spaces = vec![space];
+        let mut visible_space_centers = HashMap::default();
+        visible_space_centers.insert(space, CGPoint::new(0.0, 0.0));
+
+        let set_mode = |engine: &mut LayoutEngine, window_store: &mut WindowStore, mode| {
+            let response = engine.handle_virtual_workspace_command(
+                window_store,
+                space,
+                &LayoutCommand::SetWorkspaceLayout { workspace: None, mode },
+            );
+            assert!(response.changed);
+        };
+
+        set_mode(&mut engine, &mut window_store, LayoutMode::Bsp);
+        let _ = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+
+        set_mode(&mut engine, &mut window_store, LayoutMode::Scrolling);
+        set_mode(&mut engine, &mut window_store, LayoutMode::Monocle);
+
+        let toggle_off = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_off.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Scrolling);
+    }
+
+    #[test]
+    fn hot_reload_out_of_monocle_clears_remembered_return_mode() {
+        let mut window_store = WindowStore::default();
+        let mut engine = test_engine();
+        let space = SpaceId::new(106);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6106, 1);
+        let visible_spaces = vec![space];
+        let mut visible_space_centers = HashMap::default();
+        visible_space_centers.insert(space, CGPoint::new(0.0, 0.0));
+        let (workspace_id, workspace_name) =
+            engine.virtual_workspace_manager_mut().list_workspaces(space)[0].clone();
+
+        let _ = engine.handle_virtual_workspace_command(
+            &mut window_store,
+            space,
+            &LayoutCommand::SetWorkspaceLayout {
+                workspace: None,
+                mode: LayoutMode::Bsp,
+            },
+        );
+        let _ = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+
+        let mut settings = VirtualWorkspaceSettings::default();
+        settings.workspace_rules = vec![WorkspaceLayoutRule {
+            workspace: WorkspaceSelector::Name(workspace_name),
+            layout: LayoutMode::Scrolling,
+        }];
+        engine.update_virtual_workspace_settings(&window_store, &settings);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Scrolling);
+        assert!(!engine.monocle_return_mode.contains_key(&workspace_id));
+
+        let _ = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+        let toggle_off = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_off.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Scrolling);
     }
 }

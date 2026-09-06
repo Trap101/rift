@@ -121,6 +121,7 @@ pub enum LayoutMode {
     Stack,
     MasterStack,
     Scrolling,
+    Monocle,
 }
 
 impl fmt::Display for LayoutMode {
@@ -131,6 +132,7 @@ impl fmt::Display for LayoutMode {
             Self::Stack => "stack",
             Self::MasterStack => "master_stack",
             Self::Scrolling => "scrolling",
+            Self::Monocle => "monocle",
         })
     }
 }

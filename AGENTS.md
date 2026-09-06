@@ -196,3 +196,10 @@ When adding a config field, update:
   - Narrow `is_window_visible` gate in `Reactor::remove_windows_missing_from_active_space_snapshot` (src/actor/reactor.rs:693) still evicts windows from the layout on a partial WindowServer snapshot. The membership loss that made that eviction destructive is fixed: removal stashes the last live assignment (`WindowStore::last_workspace`) and re-admission prefers it over the active workspace (`WorkspaceStore::remembered_workspace_assignment`, regression tests in `src/model/virtual_workspace.rs`).
   - Ghostty rekey fallback in `src/actor/reactor/events/window_discovery.rs:518` (`same_pid.len() == 1`) plus unrestricted `focused_window()` at `:480` and `:492` feeding `reconcile_restored_window` (src/layout_engine/engine/persistence/reconcile.rs:201).
 - The originating investigation write-up (`data/rift-relaunch/report.md`) is not committed to this repo; everything needed for follow-up ships is inlined above rather than cited by section number.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

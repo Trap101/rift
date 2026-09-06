@@ -122,6 +122,9 @@ impl VirtualWorkspace {
                     crate::layout_engine::systems::ScrollingLayoutSystem::new(&mode_settings),
                 )
             }
+            LayoutMode::Monocle => LayoutSystemKind::Monocle(
+                crate::layout_engine::systems::MonocleLayoutSystem::default(),
+            ),
         }
     }
 

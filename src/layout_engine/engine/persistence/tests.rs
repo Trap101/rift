@@ -1987,6 +1987,7 @@ fn every_layout_system_round_trips_through_ron() {
         LayoutMode::Stack,
         LayoutMode::MasterStack,
         LayoutMode::Scrolling,
+        LayoutMode::Monocle,
     ] {
         let system = VirtualWorkspace::create_layout_system(mode, &settings);
         let serialized = ron::ser::to_string(&system).unwrap();

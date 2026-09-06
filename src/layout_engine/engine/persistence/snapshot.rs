@@ -74,6 +74,8 @@ impl PersistedLayout {
             display_last_space: self.display_last_space,
             persistence: self.persistence,
             startup_restore_pending: false,
+            // Toggle return-modes are session-local and intentionally not persisted.
+            monocle_return_mode: HashMap::default(),
         }
     }
 }

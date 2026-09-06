@@ -467,6 +467,8 @@ fn layout_title(mode: &LayoutMode) -> &'static str {
         LayoutMode::Stack => "Stack",
         LayoutMode::MasterStack => "Master Stack",
         LayoutMode::Scrolling => "Scrolling",
+        // Engine-only mode for now; the menu bar needs no selector entry.
+        LayoutMode::Monocle => "Monocle",
     }
 }
 
@@ -684,6 +686,8 @@ fn build_static_menu(mtm: MainThreadMarker, handler: &MenuActionHandler) -> Buil
             LayoutMode::Stack => sel!(onSetLayoutStack:),
             LayoutMode::MasterStack => sel!(onSetLayoutMasterStack:),
             LayoutMode::Scrolling => sel!(onSetLayoutScrolling:),
+            // Monocle stays engine/CLI-only; the menu bar offers no entry for it.
+            LayoutMode::Monocle => continue,
         };
         let item = make_menu_item(
             mtm,
