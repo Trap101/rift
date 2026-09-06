@@ -150,15 +150,13 @@ impl LayoutSystem for MonocleLayoutSystem {
             return Vec::new();
         };
         let tiling = compute_tiling_area(screen, gaps);
-        // Emit the selection last so back-to-front writers stack it on top.
-        let mut ordered: Vec<WindowId> = state
-            .windows
-            .iter()
-            .copied()
-            .filter(|wid| Some(*wid) != state.selected)
-            .collect();
-        if let Some(selected) = state.selected_or_first() {
-            ordered.push(selected);
+        // The selection is emitted last purely for a stable order; the reactor raises it
+        // via the response's focus window, not by frame position.
+        let top = state.selected_or_first();
+        let mut ordered: Vec<WindowId> =
+            state.windows.iter().copied().filter(|wid| Some(*wid) != top).collect();
+        if let Some(top) = top {
+            ordered.push(top);
         }
         ordered
             .into_iter()
@@ -505,6 +503,31 @@ mod tests {
             )
             .into_iter()
             .collect()
+    }
+
+    #[test]
+    fn layout_without_selection_emits_each_window_once() {
+        let mut system = MonocleLayoutSystem::default();
+        let layout = system.create_layout();
+        system.add_window_after_selection(layout, w(1));
+        system.add_window_after_selection(layout, w(2));
+        system.layouts[layout].selected = None;
+
+        let ordered: Vec<WindowId> = system
+            .calculate_layout(
+                layout,
+                screen(),
+                0.0,
+                &HashMap::default(),
+                &crate::common::config::GapSettings::default(),
+                0.0,
+                Default::default(),
+                Default::default(),
+            )
+            .into_iter()
+            .map(|(wid, _)| wid)
+            .collect();
+        assert_eq!(ordered, vec![w(2), w(1)]);
     }
 
     #[test]
