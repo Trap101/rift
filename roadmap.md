@@ -9,7 +9,7 @@ rift is still in beta despite being quite feature rich and *relatively* bug free
 - sticky windows
 - scratchpad windows/workspace
 - docked windows that sit on the outside of the screen (maybe sticks out by 10px) and when hovered slides in to view
-- more layout styles (ie monocle, grid, etc)
+- more layout styles (ie grid, etc)
 - more animations (ie window minimize/maximize, workspace switch, etc)
 - more configuration options (ie gaps, padding, etc)
 - better multi monitor support (ie different gaps per monitor, etc)

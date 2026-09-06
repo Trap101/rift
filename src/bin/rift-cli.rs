@@ -292,7 +292,7 @@ enum WorkspaceCommands {
         /// Workspace index (0-based). Defaults to active workspace if omitted.
         #[arg(long)]
         workspace_id: Option<usize>,
-        /// Layout mode: traditional, bsp, stack, master_stack, scrolling
+        /// Layout mode: traditional, bsp, stack, master_stack, scrolling, monocle
         mode: String,
     },
 }
@@ -1185,6 +1185,50 @@ mod tests {
             serde_json::json!({
                 "execute_command": { "command": { "config": { "set_animate": true } } }
             })
+        );
+    }
+
+    #[test]
+    fn monocle_commands_map_to_typed_protocol_commands() {
+        let toggle = build_execute_request(ExecuteCommands::Window {
+            window_cmd: WindowCommands::ToggleMonocle,
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(toggle).unwrap(),
+            serde_json::json!({
+                "execute_command": { "command": { "layout": "toggle_monocle" } }
+            })
+        );
+
+        let set_layout = build_execute_request(ExecuteCommands::Workspace {
+            workspace_cmd: WorkspaceCommands::SetLayout {
+                workspace_id: Some(2),
+                mode: "monocle".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(set_layout).unwrap(),
+            serde_json::json!({
+                "execute_command": {
+                    "command": {
+                        "layout": { "set_workspace_layout": { "workspace": 2, "mode": "monocle" } }
+                    }
+                }
+            })
+        );
+
+        let err = build_execute_request(ExecuteCommands::Workspace {
+            workspace_cmd: WorkspaceCommands::SetLayout {
+                workspace_id: None,
+                mode: "monocl".into(),
+            },
+        })
+        .unwrap_err();
+        assert!(
+            err.contains("monocle"),
+            "error should list monocle as valid: {err}"
         );
     }
 }

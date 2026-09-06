@@ -2067,7 +2067,7 @@ impl LayoutEngine {
                 }
             }
             LayoutCommand::ToggleMonocle => {
-                return self.toggle_monocle_mode(window_store, space, workspace_id);
+                self.toggle_monocle_mode(window_store, space, workspace_id)
             }
             // handled by upper reactor
             LayoutCommand::NextWorkspace(_)
