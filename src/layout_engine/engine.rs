@@ -313,8 +313,12 @@ impl LayoutEngine {
             .unwrap_or_default();
         let raise_windows =
             self.filter_active_workspace_windows(window_store, space, raise_windows);
-        let focus_window =
-            layout.and_then(|layout| self.workspace_tree(workspace_id).selected_window(layout));
+        let focus_window = match self.focused_window {
+            Some(focused) if self.floating.is_floating(focused) => Some(focused),
+            _ => {
+                layout.and_then(|layout| self.workspace_tree(workspace_id).selected_window(layout))
+            }
+        };
         let focus_window = self.filter_active_workspace_window(window_store, space, focus_window);
         EventResponse {
             changed: true,
@@ -4750,6 +4754,53 @@ mod tests {
         );
         assert!(back.changed);
         assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+    }
+
+    #[test]
+    fn toggle_monocle_keeps_focus_on_focused_floating_window() {
+        let mut window_store = WindowStore::default();
+        let mut engine = test_engine();
+        let space = SpaceId::new(107);
+        let screen = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(1920.0, 1080.0));
+        monocle_test_space(&mut engine, &mut window_store, space, screen, 6107, 2);
+        let visible_spaces = vec![space];
+        let mut visible_space_centers = HashMap::default();
+        visible_space_centers.insert(space, CGPoint::new(0.0, 0.0));
+        let floating = WindowId::new(6107, 1);
+        let tiled = WindowId::new(6107, 2);
+
+        let _ = engine.handle_event(&mut window_store, LayoutEvent::WindowFocused(space, floating));
+        let _ = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleWindowFloating,
+        );
+        assert!(engine.floating.is_floating(floating));
+
+        let toggle_on = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_on.changed);
+        assert_eq!(engine.active_layout_mode_at(space), LayoutMode::Monocle);
+        assert_eq!(toggle_on.focus_window, Some(floating));
+        assert_eq!(toggle_on.raise_windows, vec![tiled]);
+
+        let _ = engine.handle_event(&mut window_store, LayoutEvent::WindowFocused(space, tiled));
+        let toggle_off = engine.handle_command(
+            &mut window_store,
+            Some(space),
+            &visible_spaces,
+            &visible_space_centers,
+            LayoutCommand::ToggleMonocle,
+        );
+        assert!(toggle_off.changed);
+        assert_eq!(toggle_off.focus_window, Some(tiled));
     }
 
     #[test]
