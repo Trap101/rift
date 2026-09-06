@@ -193,6 +193,8 @@ enum WindowCommands {
     ToggleFullscreen,
     /// Toggle fullscreen within configured outer gaps (respects outer gaps / fills tiling area)
     ToggleFullscreenWithinGaps,
+    /// Toggle the monocle layout for the active workspace (all windows fullscreen, selection on top)
+    ToggleMonocle,
     /// Grow the current window size (increments by ~5%).
     ResizeGrow {
         /// Axis to resize; smart chooses the nearest applicable split.
@@ -760,6 +762,9 @@ fn map_window_command(cmd: WindowCommands) -> Result<CliCommand, String> {
         WindowCommands::ToggleFullscreenWithinGaps => Ok(CliCommand::Reactor(
             reactor::Command::Layout(LC::ToggleFullscreenWithinGaps),
         )),
+        WindowCommands::ToggleMonocle => {
+            Ok(CliCommand::Reactor(reactor::Command::Layout(LC::ToggleMonocle)))
+        }
         WindowCommands::ResizeGrow { orientation } => Ok(CliCommand::Reactor(
             reactor::Command::Layout(LC::ResizeWindowGrow(orientation.into())),
         )),
@@ -837,8 +842,9 @@ fn parse_layout_mode(value: &str) -> Result<LayoutMode, String> {
         "stack" => Ok(LayoutMode::Stack),
         "master_stack" => Ok(LayoutMode::MasterStack),
         "scrolling" => Ok(LayoutMode::Scrolling),
+        "monocle" => Ok(LayoutMode::Monocle),
         other => Err(format!(
-            "Invalid layout mode '{}'; must be traditional, bsp, stack, master_stack, or scrolling",
+            "Invalid layout mode '{}'; must be traditional, bsp, stack, master_stack, scrolling, or monocle",
             other
         )),
     }
